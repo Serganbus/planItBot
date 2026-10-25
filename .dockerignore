@@ -1,0 +1,8 @@
+.git
+data
+vendor
+.env
+.phpunit.result.cache
+Dockerfile
+.dockerignore
+docker-compose.yml

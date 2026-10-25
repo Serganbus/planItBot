@@ -1,0 +1,41 @@
+{
+    "name": "app/planner-bot",
+    "description": "Telegram bot for personal day planning (schedule items and flexible tasks)",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.1",
+        "telegram-bot/api": "^2.5",
+        "planner/cli": "dev-master"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.5"
+    },
+    "repositories": {
+        "packagist": {
+            "type": "composer",
+            "url": "https://mirrors.aliyun.com/composer/"
+        },
+        "0": {
+            "type": "vcs",
+            "url": "https://github.com/Serganbus/simple-planner"
+        }
+    },
+    "autoload": {
+        "psr-4": {
+            "PlannerBot\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "PlannerBot\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "bot": "php bin/bot.php",
+        "test": "phpunit"
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
