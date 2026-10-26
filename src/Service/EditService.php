@@ -11,11 +11,11 @@ use PlannerBot\Infrastructure\ChatContext;
 /**
  * Редактирование элементов дня.
  *
- * В пакете planner/cli методы updateScheduleItem()/updateFlexibleTask()
- * меняют readonly-свойства через reflection — на PHP >= 8.4 это приводит
- * к ошибке "Cannot modify readonly property". Поэтому редактирование
- * реализовано здесь как пересоздание элемента с тем же id: remove + add в Day,
- * сохранение через репозиторий. Reflection не используется.
+ * Реализовано пересозданием элемента с тем же id: remove + add в Day,
+ * сохранение через репозиторий. Изначально так сделано из-за того, что
+ * в пакете planner до v1.0.1 методы updateScheduleItem()/updateFlexibleTask()
+ * меняли readonly-свойства через reflection и падали на PHP >= 8.4
+ * (в v1.0.1 reflection убран, readonly остался только у id).
  */
 final class EditService
 {

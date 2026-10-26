@@ -11,7 +11,7 @@ use PlannerBot\Service\EditService;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Smoke-тест: прогон основного сценария через реальный пакет planner/cli
+ * Smoke-тест: прогон основного сценария через реальный пакет serganbus/planner-cli
  * на временном каталоге. Фиксирует совместимость с установленной версией.
  */
 final class PlannerServiceIntegrationTest extends TestCase
@@ -73,9 +73,8 @@ final class PlannerServiceIntegrationTest extends TestCase
         self::assertSame(1, $stats['tasks_done']);
         self::assertSame(60, $stats['total_estimated_minutes']);
 
-        // Редактирование — через наш EditService
-        // (vendor-ные updateScheduleItem/updateFlexibleTask сломаны на PHP 8.4:
-        // reflection-запись в readonly-свойства запрещена).
+        // Редактирование — через наш EditService (пересоздание элемента
+        // с тем же id; не зависит от vendor-ных update-методов).
         $chat = (new ChatContextFactory($this->dir . '/app'))->forChat(777);
         $edit = new EditService();
 

@@ -6,7 +6,7 @@ Telegram-бот для планирования дня: ведёт распис�
 
 ## Требования
 
-- PHP >= 8.1 (разработано и проверено на 8.4)
+- PHP >= 8.4
 - Composer 2
 
 ## Установка
@@ -96,7 +96,7 @@ docker stop planner-bot      # остановка
 
 ## Хранение данных
 
-Данные каждого чата изолированы: `data/chats/{chatId}/{YYYY-MM-DD}.json` (формат — как в `planner/cli`). Состояние диалога и «текущий день» — в `data/chats/{chatId}/_state.json`.
+Данные каждого чата изолированы: `data/chats/{chatId}/{YYYY-MM-DD}.json` (формат — как в `serganbus/planner-cli`). Состояние диалога и «текущий день» — в `data/chats/{chatId}/_state.json`.
 
 ## Тесты
 
@@ -104,7 +104,7 @@ docker stop planner-bot      # остановка
 composer test
 ```
 
-Unit-тесты (парсеры, форматтеры, клавиатуры, машина состояний, диалоги) + интеграционный smoke-тест против реального `planner/cli`.
+Unit-тесты (парсеры, форматтеры, клавиатуры, машина состояний, диалоги) + интеграционный smoke-тест против реального `serganbus/planner-cli`.
 
 ## Структура кода
 
@@ -116,7 +116,7 @@ src/Callback/                  — парсинг callback_data кнопок
 src/Flow/                      — многошаговые диалоги (добавление/редактирование/цель)
 src/Infrastructure/            — фабрика сервисов на чат (репозиторий, состояние)
 src/Keyboard/                  — построение inline-клавиатур
-src/Service/                   — GoalService, EditService (обход бага с reflection)
+src/Service/                   — GoalService, EditService (редактирование записей)
 src/State/                     — хранилище состояния диалога на чат
 src/Util/                      — парсеры дат/времени/приоритетов/тегов, резолв id по префиксу
 src/View/                      — рендер дня и статистики (HTML)
@@ -124,6 +124,6 @@ src/View/                      — рендер дня и статистики (
 
 ## Известные нюансы
 
-- В `planner/cli` методы `updateScheduleItem()`/`updateFlexibleTask()` меняют readonly-свойства через reflection и **падают на PHP >= 8.4**. Поэтому редактирование выполняет `PlannerBot\Service\EditService` (пересоздание элемента с тем же id, без reflection).
+- До `serganbus/planner-cli` v1.0.1 методы `updateScheduleItem()`/`updateFlexibleTask()` меняли readonly-свойства через reflection и **падали на PHP >= 8.4**; в v1.0.1 это исправлено (readonly остался только у `id`). Редактирование по-прежнему выполняет `PlannerBot\Service\EditService` (пересоздание элемента с тем же id).
 - `callback_data` кнопок ограничен 64 байтами — UUID записей в кнопках сокращаются до 8-символьного префикса и резолвятся поиском по префиксу (`IdResolver`).
 - Библиотека `telegram-bot/api` выдаёт `E_DEPRECATED` на PHP 8.4 (неявные nullable-параметры); в `bin/bot.php` deprecation-нотисы отключены.
