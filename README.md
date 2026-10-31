@@ -47,6 +47,10 @@ php artisan serve                 # http://localhost:8000
 
 ## Развёртывание (production)
 
+Два пути (оба задокументированы в `plans/`):
+- **`plans/03-Deploy-docker-plan.md`** — всё в контейнерах (app/worker/scheduler/redis), на хосте только nginx+certbot+PostgreSQL (Dockerfile.prod-образ проверен сборкой).
+- Ниже — нативный вариант (PHP-FPM на хосте): `plans/02-Deploy-plan.md` расширяет его пошагово.
+
 ### 1. Nginx + PHP-FPM
 
 ```nginx

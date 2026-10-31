@@ -1,0 +1,77 @@
+# Production-стек в контейнерах. НА ХОСТЕ уже есть: PostgreSQL, nginx, certbot.
+# В Docker — только: app (php-fpm), worker (очередь telegram ×2), scheduler, redis.
+#
+#   docker compose -f docker-compose.prod.yml --env-file .env up -d --build
+#
+# nginx на хосте: root <checkout>/public (статика Mini App лежит в git-чекауте),
+# fastcgi_pass 127.0.0.1:9000 (php-fpm из контейнера app).
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: planner-bot-app:latest
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # php-fpm только для nginx на хосте — наружу не выставляем
+      - "127.0.0.1:9000:9000"
+    extra_hosts:
+      # если PostgreSQL живёт на этом же хосте вне docker: DB_HOST=host.docker.internal
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [planner]
+
+  worker:
+    image: planner-bot-app:latest
+    restart: unless-stopped
+    env_file: .env
+    command: php artisan queue:work redis --queue=telegram --tries=3 --backoff=5 --sleep=3 --max-time=3600
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+      app:
+        condition: service_started
+    networks: [planner]
+    deploy:
+      replicas: 2
+
+  scheduler:
+    image: planner-bot-app:latest
+    restart: unless-stopped
+    env_file: .env
+    command: php artisan schedule:work
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+      app:
+        condition: service_started
+    networks: [planner]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [planner]
+    # порт наружу НЕ публикуется
+
+networks:
+  planner:
+
+volumes:
+  redis-data:
+    name: planner-bot-prod-redis-data

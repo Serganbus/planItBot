@@ -25,6 +25,7 @@ Telegram-бот планировщика дня (расписание, гибк�
 ## Инфраструктура и запуск
 
 - Docker: `docker compose up -d --wait` → postgres:17-alpine (хостовый порт **5433**, не 5432!) + redis:7-alpine (6379). Локальные креды: `planner/planner_secret`.
+- Production в контейнерах: корневой `Dockerfile` (php8.4-fpm-alpine multi-stage, pgsql+redis ext), `docker-compose.prod.yml` (app=php-fpm на 127.0.0.1:9000 / worker ×2 / scheduler / redis), entrypoint `docker/php/entrypoint.sh` (config/route/event cache на старте). План: `plans/03-Deploy-docker-plan.md`; хостовый nginx → fastcgi_pass 127.0.0.1:9000, статика Mini App из git-чекаута.
 - Установка/Миграции: `composer install && php artisan key:generate && php artisan migrate --seed` (демо-чат 42).
 - Тестовая БД: `planner_bot_test` (в том же контейнере; `CREATE DATABASE planner_bot_test OWNER planner`), креды в `phpunit.xml`.
 - Тесты: `composer test` (`php artisan test`, Pest 3 — ~80 тестов Feature+Unit на реальном PG). Конкурентность `completeTask` — двумя PHP-процессами (`tests/Feature/Domain/ConcurrencyTest.php`).
