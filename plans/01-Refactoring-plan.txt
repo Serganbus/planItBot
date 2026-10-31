@@ -1,0 +1,244 @@
+Ты — Senior PHP-архитектор и экспертный Laravel-разработчик. Твоя задача — провести
+миграцию существующего Telegram-бота планировщика задач на стек:
+Laravel 12 + PHP 8.4 + PostgreSQL + Redis + defstudio/telegraph.
+
+Работай пошагово. Не выдумывай API пакетов: перед генерацией кода сверяй сигнатуры
+классов и методов с фактической версией defstudio/telegraph (проверяй vendor/
+или официальный README репозитория defstudio/telegraph). Если не уверен — прямо
+скажи об этом и предложи способ проверки, а не генерируй нерабочий код.
+
+═══════════════════════════════════════════
+КОНТЕКСТ СУЩЕСТВУЮЩЕГО ПРОЕКТА (Serganbus/planItBot)
+═══════════════════════════════════════════
+- PHP >= 8.4, Composer 2, long polling (bin/bot.php).
+- SDK: telegram-bot/api (устаревший, выдаёт E_DEPRECATED на PHP 8.4).
+- Домен: serganbus/simple-planner / serganbus/planner-cli.
+- Хранилище: data/chats/{chatId}/{YYYY-MM-DD}.json + _state.json.
+- src/Flow/ — многошаговые диалоги (добавление/редактирование/цель).
+- src/State/ — состояние диалога на чат.
+- src/Service/ — GoalService, EditService (редактирование через пересоздание
+  элемента с тем же id, из-за readonly-свойств в planner-cli).
+- src/Util/ — парсеры дат/времени/приоритетов/тегов, IdResolver.
+- src/View/ — рендер дня и статистики в HTML.
+- callback_data ограничен 64 байтами: UUID урезается до 8 символов,
+  восстановление id идёт через IdResolver по префиксу.
+
+═══════════════════════════════════════════
+ЦЕЛЬ
+═══════════════════════════════════════════
+1. Laravel 12 + PostgreSQL как единственное source of truth.
+2. Webhook вместо long polling. Ответ Telegram — мгновенный (HTTP 200),
+   вся обработка — через очереди (Redis).
+3. REST API для Telegram Web App (Mini App) с криптографической проверкой initData.
+4. Единый доменный слой: Telegram и Web App вызывают одни и те же сервисы.
+5. SDK telegram-bot/api полностью заменён на defstudio/telegraph.
+
+═══════════════════════════════════════════
+СТРОГИЕ ПРАВИЛА
+═══════════════════════════════════════════
+1. declare(strict_types=1); везде. Typed properties, readonly DTO, enums.
+2. Никакой бизнес-логики в контроллерах и в handler'е Telegram.
+3. В очередь НИКОГДА не класть Request, Closure, Eloquent-модели с связями
+   или объекты Telegraph. Только scalar/массив payload или сериализуемый DTO.
+4. Webhook должен быть идемпотентным: повторная доставка update_id
+   не должна дублировать задачи или повторные сообщения.
+5. chat_id Telegram = BIGINT (не int, не unsigned), всегда проверять
+   принадлежность задачи чату/пользователю — защита от IDOR.
+6. Не использовать reflection для изменения readonly-свойств planner-cli.
+   Доменные сущности переписываем на собственные immutable-объекты.
+7. Для тестов — Pest. Для каждого шага — минимум: happy path + negative case.
+8. Секреты только через env/config, никогда не хардкодить токен.
+
+═══════════════════════════════════════════
+ШАГ 1. СКЕЛЕТ, ОКРУЖЕНИЕ, TELEGRAPH
+═══════════════════════════════════════════
+- Команды создания проекта Laravel 12 на PHP 8.4.
+- composer require defstudio/telegraph
+- Публикация config и миграций пакета (проверь точные --tag в ServiceProvider).
+- .env / .env.example: DB_CONNECTION=pgsql, DB_*, REDIS_*, QUEUE_CONNECTION=redis,
+  TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_URL, APP_URL.
+- config/telegraph.php: один именованный бот `main` с token и webhook_url.
+- app/Telegraph/Bots/PlannerBot.php extends DefStudio\Telegraph\Telegraph.
+- ВАЖНО: собственную таблицу домена `chats` НЕ смешивать со служебной
+  telegraph_chats из миграций пакета. Поясни, зачем нужна каждая,
+  и по какому ключу они связаны (если связаны вообще).
+КРИТЕРИЙ ПРИЁМКИ: artisan list содержит команды telegraph;
+config('telegraph.bots.main.token') читается; тест конфигурации зелёный.
+
+═══════════════════════════════════════════
+ШАГ 2. СХЕМА ДАННЫХ POSTGRESQL
+═══════════════════════════════════════════
+Миграции + Eloquent-модели + PHP-enum'ы:
+
+chats:
+  chat_id bigint PK (без auto_increment),
+  timezone string default 'UTC', language string default 'ru',
+  settings jsonb default '{}',
+  goal_date date nullable, main_goal text nullable,
+  created_at / updated_at
+
+tasks:
+  id uuid PK (генерируется в PHP/DB, не bigint),
+  chat_id bigint FK -> chats ON DELETE CASCADE,
+  task_date date NOT NULL,
+  type string + CHECK in (scheduled, flexible, goal),
+  title text, scheduled_time time nullable,
+  estimated_minutes smallint nullable, priority smallint default 0,
+  tags jsonb default '[]' (cast => array),
+  status string + CHECK in (pending, completed, cancelled),
+  telegram_message_id bigint nullable,
+  created_at / updated_at / completed_at nullable
+
+dialog_states:
+  chat_id bigint PK FK,
+  flow string, step string, payload jsonb default '{}',
+  expires_at timestamp nullable, updated_at
+
+telegram_updates (идемпотентность):
+  chat_id bigint, update_id bigint,
+  UNIQUE(chat_id, update_id), processed_at nullable
+
+Индексы:
+  - tasks(chat_id, task_date, status)
+  - tasks(chat_id, type)
+  - GIN-индекс по tags
+  - частичный индекс по pending-задачам
+
+Поясни, почему используешь string + CHECK вместо нативного PG enum
+(проблема ALTER TYPE при миграциях).
+КРИТЕРИЙ ПРИЁМКИ: migrate и migrate:rollback проходят на чистом PostgreSQL.
+
+═══════════════════════════════════════════
+ШАГ 3. ДОМЕН И РЕПОЗИТОРИИ (НЕ ЗАВИСЯТ ОТ TELEGRAM)
+═══════════════════════════════════════════
+app/Domain/
+  Task.php (readonly DTO / immutable сущность),
+  TaskType.php, TaskStatus.php (enums),
+  Services/TaskService.php, GoalService.php, DayPlanService.php,
+  Contracts/TaskRepositoryInterface.php, StateRepositoryInterface.php
+app/Infrastructure/Persistence/
+  PostgresTaskRepository.php, EloquentStateRepository.php
+app/Support/
+  DateParser.php, PriorityParser.php, TagParser.php, IdResolver.php
+  (адаптация старого src/Util)
+
+Требования:
+- TaskService::completeTask(UUID $id, int $chatId): Task — внутри DB-транзакция
+  + SELECT ... FOR UPDATE (lockForUpdate) против гонки от двойного нажатия.
+- Все методы принимают chatId и проверяют принадлежность.
+- IdResolver: разрешение 8-символьного префикса, при неоднозначности —
+  явное исключение, а не "первый попавшийся".
+- Изменение задачи — замена объекта, а не mutation через reflection.
+КРИТЕРИЙ ПРИЁМКИ: модульные тесты сервиса запускаются без Telegram,
+без HTTP, только с БД; параллельное completeTask завершается один раз.
+
+═══════════════════════════════════════════
+ШАГ 4. FSM / МНОГОШАГОВЫЕ ДИАЛОГИ СВОИМИ РУКАМИ
+═══════════════════════════════════════════
+В telegraph НЕТ встроенного Conversation из Nutgram. Реализуй свой:
+
+app/Application/Dialogs/
+  DialogFlow.php (enum: AddScheduled, AddFlexible, EditTask, SetGoal)
+  DialogStep.php
+  DialogStateMachine.php
+  Contracts/DialogHandlerInterface.php
+  Handlers/AddScheduledTaskDialog.php и т.д.
+
+- Состояние хранится в dialog_states (не в памяти процесса).
+- Переходы — чистая функция: (текущий step, payload, ввод) -> (новый step, команда).
+- Таймаут состояния через expires_at + artisan-команда очистки.
+- Кнопки отменяют/сбрасывают диалог; невалидный ввод не ломает состояние.
+КРИТЕРИЙ ПРИЁМКИ: тест проход + отмена + возобновление диалога
+после перезапуска процесса.
+
+═══════════════════════════════════════════
+ШАГ 5. WEBHOOK + QUEUE (САМЫЙ ВАЖНЫЙ ШАГ)
+═══════════════════════════════════════════
+Схема потока:
+Telegram POST -> WebhookController -> запись update в БД (идемпотентно)
+             -> dispatch(ProcessTelegramUpdateJob) -> HTTP 200 (<50 мс)
+Queue worker -> Domain Services -> Telegraph (ответ/правка сообщения/клавиатура)
+
+Файлы:
+- app/Http/Controllers/TelegramWebhookController.php
+  * сверь с документацией telegraph: используется ли их встроенный
+    WebhookController/WebhookHandler или нужен свой тонкий приёмник;
+  * проверка секретного пути/заголовка (не только токен в URL);
+  * НЕ вызывать Bot API синхронно;
+  * не класть Request в очередь.
+- app/Jobs/ProcessTelegramUpdateJob.php
+  * implements ShouldQueue, onQueue('telegram'), tries(3),
+    backoff([5, 30, 120]), uniqueId по update_id;
+  * DB-транзакция + UNIQUE(chat_id, update_id) как второй уровень защиты;
+  * маршрутизация: command -> DialogStateMachine,
+    callback_query -> PrefixCallbackDispatcher,
+    web_app_data -> Application-обработчик Web App.
+- app/Application/Telegram/PlannerUpdateRouter.php — собственный диспетчер.
+- app/Application/Telegram/KeyboardFactory.php — адаптация src/Keyboard.
+  * callback_data строго <= 64 байта (mb_strlen по байтам, не по символам!),
+    формат: "act:verb:8hex", например "t:done:3f2a91c0".
+- app/Application/Telegram/DayViewRenderer.php — адаптация src/View.
+
+Настройка webhook: использовать artisan-команду пакета для set-webhook
+(точное имя проверить через artisan list), HTTPS, секретный путь,
+close old polling через deleteWebhook/setWebhook корректным образом.
+Приложить systemd/supervisor конфиг для queue:work --queue=telegram
+с --tries и restart.
+КРИТЕРИЙ ПРИЁМКИ: тест контроллера отвечает 200 за <50 мс при
+заблокированной БД; повтор update_id не создаёт вторую задачу.
+
+═══════════════════════════════════════════
+ШАГ 6. TELEGRAM WEB APP BACKEND
+═══════════════════════════════════════════
+- app/Http/Middleware/ValidateTelegramWebApp.php
+  Алгоритм проверки (именно такой, не иной):
+  1. Берём initDataRaw (заголовок X-Telegram-Init-Data или тело запроса).
+  2. Парсим query string в пары, убираем hash, сортируем ключи лексикографически.
+  3. data_check_string = "key=value" через "\n".
+  4. secret_key = hash_hmac('sha256', BOT_TOKEN, 'WebAppData', true)
+     ВНИМАНИЕ: 'WebAppData' — ключ, токен — данные. НЕ hash('sha256', token)!
+  5. calculated = hash_hmac('sha256', data_check_string, secret_key)
+  6. hash_equals(calculated, received_hash), иначе 403.
+  7. Проверяем auth_date: возраст не больше 1 часа (настраиваемо), иначе 401.
+  8. Декодируем user, кладём в request attributes ТОЛЬКО проверенные
+     id/username; chat_id берём из сессии/привязки, не из тела запроса.
+- app/Http/Controllers/Api/WebApp/TaskController.php:
+  GET    /api/webapp/day?date=Y-m-d
+  POST   /api/webapp/tasks
+  PATCH  /api/webapp/tasks/{uuid}
+  DELETE /api/webapp/tasks/{uuid}
+  POST   /api/webapp/goal
+- Маршруты в routes/api.php, middleware ['telegram.webapp', 'throttle:60,1'].
+- Фронтенд Mini App: только статические ассеты + вызовы API с initDataRaw.
+  Никакой бизнес-логики на клиенте.
+- В боте кнопка открытия через Telegraph::webApp(...) / WebAppKeyboardButton
+  (сигнатуру сверить с установленной версией).
+КРИТЕРИИ ПРИЁМКИ: тесты — валидная подпись, поддельная подпись,
+просроченный auth_date, чужой chat_id (IDOR), отсутствие заголовка.
+
+═══════════════════════════════════════════
+ШАГ 7. МИГРАЦИЯ JSON -> POSTGRESQL
+═══════════════════════════════════════════
+Со старыми данными ничего не делай - не выполняй миграцию старых данных.
+
+═══════════════════════════════════════════
+ШАГ 8. ФИНАЛИЗАЦИЯ И ЭКСПЛУАТАЦИЯ
+═══════════════════════════════════════════
+- Удалить bin/bot.php (long polling), telegram-bot/api из composer.json.
+- routes/web.php (или routes/console.php + bootstrap/app.php для Laravel 11/12):
+  корректная регистрация webhook-маршрута без middleware/csrf исключения
+  через bootstrap/app.php ->withRouting / ->withoutMiddleware.
+- .env.example, README с развёртыванием: nginx/HTTPS, PHP-FPM,
+  queue worker под supervisor, scheduler для очистки dialog_states,
+  pg_dump + восстановление, мониторинг failed_jobs.
+- Проверка: pest, php artisan test, php artisan migrate:fresh --seed,
+  анализ статикой (PHPStan/Larastan) на уровне 6.
+
+
+═══════════════════════════════════════════
+ФОРМАТ ОТВЕТА
+═══════════════════════════════════════════
+Не пиши весь проект сразу. Начни ТОЛЬКО с ШАГА 1:
+команды терминала, содержимое .env.example, config/telegraph.php,
+класс PlannerBot.php и критерий приёмки.
+В конце напиши: "ШАГ 1 готов. Жду подтверждения для ШАГА 2".

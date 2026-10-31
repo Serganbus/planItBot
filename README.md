@@ -1,129 +1,141 @@
-# Planner bot
+# Planner Bot
 
-Telegram-бот для планирования дня: ведёт расписание (пункты со временем) и список гибких задач (оценка в минутах + приоритет), хранит главную цель дня, показывает статистику и поддерживает теги.
+Telegram-бот планировщика дня: расписание, гибкие задачи с оценкой и приоритетом, главная цель дня, мини-приложение (Mini App).
 
-Функционал календаря — на пакете [Serganbus/simple-planner](https://github.com/Serganbus/simple-planner), взаимодействие с Telegram — на пакете [TelegramBot/Api](https://github.com/TelegramBot/Api).
+**Стек:** Laravel 12 · PHP 8.4 · PostgreSQL · Redis · [defstudio/telegraph](https://docs.defstudio.it/telegraph) · webhook + очередь (без long polling).
 
-## Требования
+## Архитектура одной строкой
 
-- PHP >= 8.4
-- Composer 2
+```
+Telegram → POST /api/telegram/webhook → telegram_updates (идемпотентность)
+         → Redis (queue:work) → доменные сервисы (app/Domain) → Telegraph API
+Mini App → /api/webapp/* (HMAC-подпись initData) → те же доменные сервисы
+```
 
-## Установка
+Единый домен не зависит от транспорта: и бот, и REST API работают через `TaskService`/`DayPlanService`/`GoalService`.
+
+## Быстрый старт (разработка)
 
 ```bash
 composer install
+cp .env.example .env
+php artisan key:generate
+
+# инфраструктура (PostgreSQL :5433, Redis :6379)
+docker compose up -d --wait
+
+php artisan migrate --seed        # демо-чат 42 с примерами задач
+php artisan serve                 # http://localhost:8000
 ```
 
-> **Если packagist.org недоступен из вашей сети**: в `composer.json` уже прописано рабочее зеркало (`mirrors.aliyun.com/composer`). Если сеть имеет прямой доступ к Packagist, зеркало можно убрать: `composer config --unset repos.packagist.org`, затем `composer update`.
+Тесты: `composer test`. Статанализ (PHPStan/Larastan, уровень 6): `composer analyse`.
 
-## Настройка
+## Конфигурация (.env)
 
-1. Создайте бота через [@BotFather](https://t.me/BotFather), получите токен.
-2. Установите переменные окружения:
+Обязательные: `TELEGRAM_BOT_TOKEN`. Для продакшена дополнительно:
 
-| Переменная | Обязательна | По умолчанию | Назначение |
-|---|---|---|---|
-| `BOT_TOKEN` | да | — | Токен бота от @BotFather |
-| `BOT_DATA_DIR` | нет | `data/` в корне проекта | Каталог хранения данных чатов |
-| `BOT_TIMEZONE` | нет | `Europe/Moscow` | Таймзона для «сегодня/завтра» |
-| `POLL_TIMEOUT` | нет | `30` | Таймаут long polling (сек) |
-
-## Запуск
-
-```bash
-composer bot
-# или
-BOT_TOKEN="123:abc" php bin/bot.php
-```
-
-Бот работает через long polling — публичный сервер и HTTPS не нужны. Остановка: `Ctrl+C`. При запуске бэклог апдейтов, накопившийся за время простоя, сбрасывается.
-
-## Запуск в Docker
-
-Образ на базе `php:8.4-cli-alpine` (~119 МБ), сборка многоступенчатая, бот работает от непривилегированного пользователя `planner`. Данные чатов сохраняются в volume `planner-bot-data` (`/app/data` внутри контейнера) и переживают пересоздание контейнера.
-
-### Через docker compose (рекомендуется)
-
-```bash
-cp .env.example .env   # вписать BOT_TOKEN
-docker compose up -d --build
-
-docker compose logs -f bot   # логи polling'а
-docker compose down          # остановка (данные в volume сохраняются)
-docker compose down -v       # остановка с удалением данных
-```
-
-Compose-переменные берутся из `.env` или окружения: `BOT_TOKEN` (обязателен — без него compose падает с явной ошибкой), `BOT_TIMEZONE` и `POLL_TIMEOUT` (опциональны, есть значения по умолчанию). Задана ротация логов (json-file, 10 МБ × 3 файла) и политика `restart: unless-stopped`.
-
-### Напрямую через docker run
-
-```bash
-docker build -t planner-bot .
-
-docker run -d --name planner-bot --restart unless-stopped \
-  -e BOT_TOKEN="123:abc" \
-  [-e BOT_TIMEZONE="Europe/Moscow"] \
-  -v planner-bot-data:/app/data \
-  planner-bot
-
-docker logs -f planner-bot   # логи polling'а
-docker stop planner-bot      # остановка
-```
-
-Дополнительные env-переменные — см. таблицу «Настройка».
-
-## Команды
-
-| Команда | Описание |
+| Переменная | Назначение |
 |---|---|
-| `/start` | Приветствие и краткая шпаргалка |
-| `/help` | Полная справка |
-| `/today` | План на сегодня |
-| `/day [дата]` | План на дату: `YYYY-MM-DD`, `ДД.ММ.ГГГГ`, `сегодня`, `завтра`, `вчера`, `+N` |
-| `/add` | Пункт расписания: пошаговый диалог или сразу `/add 09:00 10:30 Название #тег` |
-| `/task` | Задача: диалог или сразу `/task Название [минуты] [low\|medium\|high] #тег` |
-| `/goal [текст]` | Показать/установить главную цель текущего дня |
-| `/done` | Отметить выполненное / вернуть в работу (кнопки) |
-| `/edit` | Изменить запись (выбор кнопкой → поле → значение) |
-| `/remove` | Удалить запись (с подтверждением) |
-| `/tags` | Теги текущего дня |
-| `/tag #имя` | Записи дня с указанным тегом |
-| `/stats` | Статистика дня + навигация по датам |
-| `/cancel` | Прервать активный диалог |
+| `DB_*` | PostgreSQL (в docker-compose уже согласованы: `planner/planner_secret`, хост `5433`) |
+| `REDIS_*` | Redis (`QUEUE_CONNECTION=redis`) |
+| `APP_URL` | публичный HTTPS-URL приложения |
+| `TELEGRAM_WEBHOOK_URL` | `https://domain/api/telegram/webhook` |
+| `TELEGRAPH_WEBHOOK_SECRET` | секрет проверки заголовка webhook (задайте!) |
+| `TELEGRAM_WEBAPP_URL` | `https://domain/webapp/index.html` — кнопка Mini App |
+| `WEBAPP_AUTH_MAX_AGE` | TTL initData Mini App, сек (по умолчанию 3600) |
+| `DIALOG_TTL_MINUTES` | TTL FSM-состояний, мин (по умолчанию 30) |
 
-«Текущий день» — последняя открытая дата (`/today`, `/day`, кнопки ◀ ▶, добавление записей); сохраняется в состоянии чата между сообщениями.
+## Развёртывание (production)
 
-## Хранение данных
+### 1. Nginx + PHP-FPM
 
-Данные каждого чата изолированы: `data/chats/{chatId}/{YYYY-MM-DD}.json` (формат — как в `serganbus/planner-cli`). Состояние диалога и «текущий день» — в `data/chats/{chatId}/_state.json`.
+```nginx
+server {
+    listen 443 ssl;
+    server_name bot.example.com;
+    root /var/www/planner-bot/public;
 
-## Тесты
+    ssl_certificate     /etc/letsencrypt/live/bot.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/bot.example.com/privkey.pem;
+
+    index index.php;
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+        fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+    }
+}
+```
+
+HTTPS обязателен: Telegram принимает webhook только по TLS.
+
+### 2. Приложение
 
 ```bash
-composer test
+composer install --no-dev --optimize-autoloader
+php artisan key:generate   # один раз
+php artisan migrate --force
+php artisan config:cache && php artisan route:cache && php artisan event:cache
 ```
 
-Unit-тесты (парсеры, форматтеры, клавиатуры, машина состояний, диалоги) + интеграционный smoke-тест против реального `serganbus/planner-cli`.
+### 3. Вебхук
 
-## Структура кода
-
-```
-bin/bot.php                    — точка входа (long polling)
-config/config.php              — конфигурация из переменных окружения
-src/BotKernel.php              — регистрация обработчиков, цикл polling, маршрутизация команд/кнопок
-src/Callback/                  — парсинг callback_data кнопок
-src/Flow/                      — многошаговые диалоги (добавление/редактирование/цель)
-src/Infrastructure/            — фабрика сервисов на чат (репозиторий, состояние)
-src/Keyboard/                  — построение inline-клавиатур
-src/Service/                   — GoalService, EditService (редактирование записей)
-src/State/                     — хранилище состояния диалога на чат
-src/Util/                      — парсеры дат/времени/приоритетов/тегов, резолв id по префиксу
-src/View/                      — рендер дня и статистики (HTML)
+```bash
+php artisan telegram:webhook set    # читает TELEGRAM_WEBHOOK_URL + TELEGRAPH_WEBHOOK_SECRET
+php artisan telegram:webhook info   # проверка
 ```
 
-## Известные нюансы
+### 4. Воркер очереди (supervisor)
 
-- До `serganbus/planner-cli` v1.0.1 методы `updateScheduleItem()`/`updateFlexibleTask()` меняли readonly-свойства через reflection и **падали на PHP >= 8.4**; в v1.0.1 это исправлено (readonly остался только у `id`). Редактирование по-прежнему выполняет `PlannerBot\Service\EditService` (пересоздание элемента с тем же id).
-- `callback_data` кнопок ограничен 64 байтами — UUID записей в кнопках сокращаются до 8-символьного префикса и резолвятся поиском по префиксу (`IdResolver`).
-- Библиотека `telegram-bot/api` выдаёт `E_DEPRECATED` на PHP 8.4 (неявные nullable-параметры); в `bin/bot.php` deprecation-нотисы отключены.
+`deploy/planner-bot-worker.conf` → `/etc/supervisor/conf.d/`, затем `supervisorctl reread && update`. Внутри файла — готовый эквивалент systemd unit.
+
+### 5. Планировщик (очистка просроченных диалогов и пр.)
+
+Cron: `* * * * * cd /var/www/planner-bot && php artisan schedule:run >> /dev/null 2>&1`
+
+### 6. Бэкапы PostgreSQL
+
+```bash
+# дамп
+pg_dump -h 127.0.0.1 -p 5433 -U planner planner_bot | gzip > backup-$(date +%F).sql.gz
+# восстановление
+gunzip -c backup-2026-10-26.sql.gz | psql -h 127.0.0.1 -p 5433 -U planner planner_bot
+```
+В Docker: `docker compose exec -T postgres pg_dump -U planner planner_bot | gzip > backup-$(date +%F).sql.gz`.
+
+### 7. Мониторинг failed_jobs
+
+```bash
+php artisan queue:failed            # список упавших задач
+php artisan queue:retry <uuid>      # повторить конкретную
+php artisan queue:retry all         # повторить все после инцидента
+```
+Джоба телеграм-апдейтов: 3 попытки, backoff 5/30/120 c; повторная доставка update_id дубли не создаёт (идемпотентность на уровне БД).
+
+## Команды artisan (собственные)
+
+| Команда | Назначение |
+|---|---|
+| `telegram:webhook set|delete|info` | управление webhook |
+| `dialogs:purge-stale` | очистка просроченных FSM-состояний (в планировщике hourly) |
+
+## Структура
+
+```
+app/
+  Application/Dialogs/      FSM: DialogStateMachine + обработчики (чистые переходы)
+  Application/Telegram/     роутинг апдейтов, клавиатуры, рендер дня, messenger
+  Console/Commands/         telegram:webhook, dialogs:purge-stale
+  Domain/                   Task/DayPlan/DialogState DTO, enum'ы, сервисы, контракты
+  Http/Controllers|Middleware/  webhook-приёмник, WebApp API, подпись initData
+  Infrastructure/Persistence/  Postgres/Eloquent реализации репозиториев
+  Jobs/ProcessTelegramUpdateJob
+  Models/, Providers/, Support/ (парсеры ввода)
+database/migrations|seeders  доменная схема + демо-данные
+deploy/planner-bot-worker.conf supervisor/systemd для queue:work
+docker-compose.yml           postgres:17 + redis:7 (для разработки)
+public/webapp/               статика Mini App (vanilla JS, только вызовы API)
+```

@@ -1,20 +1,42 @@
 services:
-  bot:
-    build: .
-    image: planner-bot:latest
-    container_name: planner-bot
+  postgres:
+    image: postgres:17-alpine
+    container_name: planner-bot-postgres
     restart: unless-stopped
     environment:
-      # Токен от @BotFather — обязателен; без него compose упадёт с понятной ошибкой
-      BOT_TOKEN: ${BOT_TOKEN:?Установите BOT_TOKEN в .env или окружении}
-      # Каталог данных внутри контейнера (совпадает с volume ниже)
-      BOT_DATA_DIR: /app/data
-      # Таймзона для "сегодня/завтра" (переопределяется в .env)
-      BOT_TIMEZONE: ${BOT_TIMEZONE:-Asia/Novosibirsk}
-      # Таймаут long polling, секунд
-      POLL_TIMEOUT: ${POLL_TIMEOUT:-30}
+      POSTGRES_DB: ${DB_DATABASE:-planner_bot}
+      POSTGRES_USER: ${DB_USERNAME:-planner}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Установите DB_PASSWORD в .env или окружении}
+    ports:
+      # 5432 хоста может быть занят другим проектом — наружу смотрим на 5433
+      - "5433:5432"
     volumes:
-      - bot-data:/app/data
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    container_name: planner-bot-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     logging:
       driver: json-file
       options:
@@ -22,5 +44,7 @@ services:
         max-file: "3"
 
 volumes:
-  bot-data:
-    name: planner-bot-data
+  pg-data:
+    name: planner-bot-pgdata
+  redis-data:
+    name: planner-bot-redis-data

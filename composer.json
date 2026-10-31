@@ -1,41 +1,83 @@
 {
+    "$schema": "https://getcomposer.org/schema.json",
     "name": "app/planner-bot",
-    "description": "Telegram bot for personal day planning (schedule items and flexible tasks)",
     "type": "project",
+    "description": "Telegram-бот планировщика дня: расписание, гибкие задачи, цель дня. Laravel 12 + PostgreSQL + Redis + defstudio/telegraph.",
     "license": "MIT",
     "require": {
         "php": ">=8.4",
-        "serganbus/planner-cli": "^1.0.1",
-        "telegram-bot/api": "^2.5"
+        "defstudio/telegraph": "^1.66",
+        "laravel/framework": "^12.0",
+        "laravel/tinker": "^2.10.1"
     },
     "require-dev": {
-        "phpunit/phpunit": "^10.5"
+        "fakerphp/faker": "^1.23",
+        "larastan/larastan": "^3.0",
+        "laravel/pail": "^1.2.2",
+        "laravel/pint": "^1.13",
+        "laravel/sail": "^1.41",
+        "mockery/mockery": "^1.6",
+        "nunomaduro/collision": "^8.6",
+        "pestphp/pest": "^3.7",
+        "pestphp/pest-plugin-laravel": "^3.1"
     },
     "repositories": {
-        "packagist": {
+        "packagist.org": {
             "type": "composer",
             "url": "https://mirrors.aliyun.com/composer/"
-        },
-        "0": {
-            "type": "vcs",
-            "url": "https://github.com/Serganbus/simple-planner"
         }
     },
     "autoload": {
         "psr-4": {
-            "PlannerBot\\": "src/"
+            "App\\": "app/",
+            "Database\\Factories\\": "database/factories/",
+            "Database\\Seeders\\": "database/seeders/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "PlannerBot\\Tests\\": "tests/"
+            "Tests\\": "tests/"
         }
     },
     "scripts": {
-        "bot": "php bin/bot.php",
-        "test": "phpunit"
+        "post-autoload-dump": [
+            "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
+            "@php artisan package:discover --ansi"
+        ],
+        "post-update-cmd": [
+            "@php artisan vendor:publish --tag=laravel-assets --ansi --force"
+        ],
+        "post-root-package-install": [
+            "@php -r \"file_exists('.env') || copy('.env.example', '.env');\""
+        ],
+        "post-create-project-cmd": [
+            "@php artisan key:generate --ansi",
+            "@php artisan migrate --graceful --ansi"
+        ],
+        "dev": [
+            "Composer\\Config::disableProcessTimeout",
+            "npx concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74\" \"php artisan serve\" \"php artisan queue:listen --tries=1\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,queue,logs,vite"
+        ],
+        "test": "@php artisan test",
+        "analyse": "phpstan analyse"
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-master": "12.x-dev"
+        },
+        "laravel": {
+            "dont-discover": []
+        }
     },
     "config": {
-        "sort-packages": true
-    }
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "php-http/discovery": true
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
 }

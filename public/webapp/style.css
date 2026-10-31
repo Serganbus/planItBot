@@ -1,0 +1,36 @@
+:root {
+    color-scheme: light dark;
+    --bg: var(--tg-theme-bg-color, #fff);
+    --text: var(--tg-theme-text-color, #000);
+    --hint: var(--tg-theme-hint-color, #999);
+    --btn: var(--tg-theme-button-color, #3390ec);
+    --btn-text: var(--tg-theme-button-text-color, #fff);
+    --sec: var(--tg-theme-secondary-bg-color, #f3f3f3);
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); }
+#app { padding: 12px; max-width: 480px; margin: 0 auto; }
+header { display: flex; gap: 8px; margin-bottom: 10px; }
+.nav { flex: 1; padding: 8px; border: 0; border-radius: 8px; background: var(--sec); color: var(--text); }
+.goal-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.goal { flex: 1; font-size: 14px; }
+h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .5px; color: var(--hint); margin: 14px 0 6px; }
+.list { list-style: none; margin: 0; padding: 0; }
+.list li { display: flex; align-items: center; gap: 8px; padding: 9px 10px; background: var(--sec); border-radius: 8px; margin-bottom: 6px; }
+.list li .time { font-variant-numeric: tabular-nums; color: var(--hint); min-width: 42px; }
+.list li .title { flex: 1; word-break: break-word; }
+.list li.done .title { text-decoration: line-through; color: var(--hint); }
+.list li .meta { font-size: 12px; color: var(--hint); }
+.list li button { border: 0; background: transparent; font-size: 17px; cursor: pointer; padding: 0 2px; }
+.empty { color: var(--hint); font-size: 13px; }
+.stats { margin-top: 12px; font-size: 13px; color: var(--hint); }
+.add { margin-top: 16px; }
+.add summary { cursor: pointer; color: var(--btn); padding: 8px 0; }
+form { display: grid; gap: 8px; margin-top: 8px; }
+.row { display: flex; gap: 8px; }
+.row > * { flex: 1; }
+input, select { padding: 9px; border-radius: 8px; border: 1px solid var(--sec); background: var(--bg); color: var(--text); font-size: 14px; }
+.save { padding: 10px; border: 0; border-radius: 8px; background: var(--btn); color: var(--btn-text); font-size: 15px; }
+.mini { padding: 6px 10px; border: 0; border-radius: 8px; background: var(--sec); color: var(--text); }
+.status { margin-top: 12px; font-size: 13px; color: var(--hint); min-height: 18px; }
+dialog { border: 0; border-radius: 12px; padding: 16px; background: var(--bg); color: var(--text); }

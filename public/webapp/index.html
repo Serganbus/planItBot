@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Planner — день</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+    <header>
+        <button id="prev" class="nav">◀</button>
+        <button id="today" class="nav">Сегодня</button>
+        <button id="next" class="nav">▶</button>
+    </header>
+
+    <section class="goal-row">
+        <span id="goal" class="goal">🎯 Цель не задана</span>
+        <button id="goal-set" class="mini">✎</button>
+    </section>
+
+    <section>
+        <h2>Расписание</h2>
+        <ul id="scheduled" class="list"></ul>
+        <p id="scheduled-empty" class="empty">пусто</p>
+    </section>
+
+    <section>
+        <h2>Задачи</h2>
+        <ul id="flexible" class="list"></ul>
+        <p id="flexible-empty" class="empty">пусто</p>
+    </section>
+
+    <section id="stats" class="stats"></section>
+
+    <details class="add">
+        <summary>＋ Добавить</summary>
+        <form id="add-form">
+            <select id="f-type">
+                <option value="scheduled">Пункт расписания</option>
+                <option value="flexible">Гибкая задача</option>
+            </select>
+            <input id="f-title" placeholder="Название" required maxlength="200">
+            <div class="row">
+                <input id="f-date" type="date" required>
+                <input id="f-time" type="time" placeholder="Время">
+            </div>
+            <div class="row">
+                <input id="f-minutes" type="number" min="0" max="10000" placeholder="Минут (опц.)">
+                <select id="f-priority">
+                    <option value="0">без приоритета</option>
+                    <option value="1">низкий</option>
+                    <option value="2">средний</option>
+                    <option value="3">высокий</option>
+                </select>
+            </div>
+            <button type="submit" class="save">Сохранить</button>
+        </form>
+    </details>
+
+    <dialog id="goal-dialog">
+        <form id="goal-form">
+            <h3>Цель дня</h3>
+            <input id="goal-text" maxlength="500" placeholder="Сформулируйте цель">
+            <div class="row">
+                <button type="submit" class="save">OK</button>
+                <button type="button" id="goal-cancel" class="mini">Отмена</button>
+            </div>
+        </form>
+    </dialog>
+
+    <p id="status" class="status"></p>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
